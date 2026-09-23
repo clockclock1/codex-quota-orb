@@ -1,0 +1,108 @@
+name: Windows builds
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Windows ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+            runner: windows-2025
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            runner: windows-11-vs2026-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build installer and standalone executable
+        run: npm run tauri -- build --target ${{ matrix.target }} --bundles nsis
+
+      - name: Stage release files
+        shell: pwsh
+        run: |
+          $target = "${{ matrix.target }}"
+          $arch = "${{ matrix.arch }}"
+          $releaseDir = Join-Path "src-tauri/target" "$target/release"
+          $appExe = Join-Path $releaseDir "codex-quota.exe"
+          if (!(Test-Path -LiteralPath $appExe)) {
+            throw "Standalone executable was not produced: $appExe"
+          }
+
+          $installerDir = Join-Path $releaseDir "bundle/nsis"
+          $installer = Get-ChildItem -LiteralPath $installerDir -Filter "*-setup.exe" -File | Select-Object -First 1
+          if (!$installer) {
+            $installer = Get-ChildItem -LiteralPath $installerDir -Filter "*.exe" -File | Select-Object -First 1
+          }
+          if (!$installer) {
+            throw "NSIS installer was not produced in $installerDir"
+          }
+
+          New-Item -ItemType Directory -Path "artifacts" -Force | Out-Null
+          Copy-Item -LiteralPath $appExe -Destination "artifacts/Codex-Quota-Windows-$arch.exe"
+          Copy-Item -LiteralPath $installer.FullName -Destination "artifacts/Codex-Quota-Windows-$arch-Setup.exe"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: artifacts/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Attach Windows builds to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-2025
+    permissions:
+      contents: write
+    steps:
+      - name: Download all architecture artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.exe
+          fail_on_unmatched_files: true

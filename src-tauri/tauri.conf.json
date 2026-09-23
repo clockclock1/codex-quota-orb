@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Codex 额度",
+  "version": "0.6.0",
+  "identifier": "com.codex.quota.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Codex 额度",
+        "width": 960,
+        "height": 680,
+        "minWidth": 720,
+        "minHeight": 600,
+        "center": true,
+        "decorations": false,
+        "visible": true
+      },
+      {
+        "label": "floating",
+        "title": "Codex 额度悬浮窗",
+        "url": "index.html?view=floating",
+        "width": 68,
+        "height": 68,
+        "minWidth": 60,
+        "minHeight": 60,
+        "maxWidth": 230,
+        "maxHeight": 68,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": false,
+        "transparent": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/installer-hooks.nsh"
+      }
+    }
+  }
+}
