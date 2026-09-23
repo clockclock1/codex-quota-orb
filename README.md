@@ -80,7 +80,7 @@ npm run tauri build
 - `Codex-Quota-Windows-x64-Setup.exe` / `Codex-Quota-Windows-arm64-Setup.exe`：NSIS 安装包，会创建或更新桌面快捷方式。
 - `Codex-Quota-Windows-x64.exe` / `Codex-Quota-Windows-arm64.exe`：不经安装器的独立可执行文件。
 
-普通工作流运行的文件可从 GitHub Actions 对应运行记录的 Artifacts 下载，保留 14 天。推送 `v` 开头的标签（例如 `v0.6.0`）时，工作流还会将两个架构的安装包和独立 exe 附加到 GitHub Release。ARM64 产物在 Windows 11 ARM64 runner 上原生编译；x64 产物可运行于常见 Intel/AMD 64 位 Windows 电脑。该工作流仅生成 Windows 产物。
+普通工作流运行的文件可从 GitHub Actions 对应运行记录的 Artifacts 下载，保留 14 天。推送 `v` 开头的标签（例如 `v0.6.1`）时，工作流还会将两个架构的安装包和独立 exe 附加到 GitHub Release。ARM64 产物在 Windows 11 ARM64 runner 上原生编译；x64 产物可运行于常见 Intel/AMD 64 位 Windows 电脑。该工作流仅生成 Windows 产物。
 
 ## 本地交叉编译
 

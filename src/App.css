@@ -74,6 +74,7 @@ button { font: inherit; }
 .compact-action { padding: 6px 10px; color: var(--ink); background: rgba(255,255,255,.035); border: 1px solid var(--line); border-radius: 5px; font-size: 10px; cursor: pointer; }
 .compact-action.is-active { color: #11150f; background: var(--acid); border-color: var(--acid); }
 .compact-action:disabled { color: #718078; background: rgba(255,255,255,.025); cursor: default; }
+.topmost-badge { padding: 6px 10px; color: #11150f; background: var(--acid); border: 1px solid var(--acid); border-radius: 5px; font-size: 10px; white-space: nowrap; }
 .settings-hint { display: block; margin-top: 8px; color: #66716b; font-size: 9px; line-height: 1.55; }
 .mini-switch { position: relative; width: 32px; height: 18px; padding: 0; background: #303735; border: 0; border-radius: 99px; cursor: pointer; }
 .mini-switch i { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; background: #7e8983; border-radius: 50%; transition: .18s ease; }
@@ -196,8 +197,8 @@ html.floating-document body { min-height: 0; background: transparent; }
 .floating-footer > span.is-error { color: var(--coral); }
 .floating-footer > span.is-error > i { background: var(--coral); box-shadow: 0 0 6px var(--coral); }
 .floating-shell--orb { display: block; overflow: hidden; border: 0; border-radius: 32px; box-shadow: none; }
-.floating-shell--orb .floating-background { border: 1px solid color-mix(in srgb, var(--acid) 38%, transparent); border-radius: 32px; opacity: 1; box-shadow: inset 0 0 0 1px rgba(255,255,255,.035), 0 12px 34px rgba(0,0,0,.34); transition: opacity .16s ease; }
-.floating-shell--orb:not(.is-expanded) .floating-background { opacity: 0; border-color: transparent; box-shadow: none; }
+.floating-shell--orb .floating-background { border: 1px solid transparent; border-radius: 34px; opacity: 0; box-shadow: none; transition: opacity .22s ease, border-color .22s ease, box-shadow .22s ease; }
+.floating-shell--orb.is-expanded .floating-background { opacity: 1; border-color: color-mix(in srgb, var(--acid) 38%, transparent); box-shadow: inset 0 0 0 1px rgba(255,255,255,.035), 0 10px 28px rgba(0,0,0,.38); }
 .floating-shell--orb.is-dragging .floating-background { opacity: 0 !important; border-color: transparent; box-shadow: none; }
 .floating-shell--orb.is-left { flex-direction: row; }
 .floating-shell--orb.is-right { flex-direction: row; }
@@ -225,9 +226,9 @@ html.floating-document body { min-height: 0; background: transparent; }
 .orb-teaser__track i { display: block; height: 100%; background: var(--acid); box-shadow: 0 0 7px color-mix(in srgb, var(--acid) 48%, transparent); transition: width .55s ease; }
 .orb-quota-row--secondary .orb-teaser__track i { background: var(--coral); box-shadow: 0 0 7px color-mix(in srgb, var(--coral) 40%, transparent); }
 .orb-quota-row > b { align-self: end; min-width: 0; overflow: hidden; color: #86978a; font: 500 7px/1 Bahnschrift, sans-serif; white-space: nowrap; text-overflow: ellipsis; }
-.orb-trigger { position: absolute; z-index: 2; top: 6px; width: 56px; height: 56px; display: grid; place-items: center; margin: 0; padding: 0; color: #f5ffe6; background: radial-gradient(circle at 35% 25%, var(--orb-light) 0, var(--orb-mid) 30%, var(--orb-deep) 72%); border: 1px solid color-mix(in srgb, var(--acid) 74%, white); border-radius: 50%; box-shadow: 0 8px 22px rgba(0,0,0,.48), 0 0 0 4px color-mix(in srgb, var(--acid) 8%, transparent), 0 0 24px color-mix(in srgb, var(--acid) 27%, transparent); cursor: grab; transition: transform .16s ease, box-shadow .16s ease, filter .16s ease; }
+.orb-trigger { position: absolute; z-index: 2; top: 6px; width: 56px; height: 56px; display: grid; place-items: center; margin: 0; padding: 0; color: #f5ffe6; background: radial-gradient(circle at 35% 25%, var(--orb-light) 0, var(--orb-mid) 30%, var(--orb-deep) 72%); border: 1px solid color-mix(in srgb, var(--acid) 74%, white); border-radius: 50%; box-shadow: 0 5px 15px rgba(0,0,0,.4), 0 0 0 3px color-mix(in srgb, var(--acid) 11%, transparent), 0 0 18px color-mix(in srgb, var(--acid) 23%, transparent); cursor: grab; transition: transform .16s ease, box-shadow .22s ease, filter .16s ease; }
 .orb-trigger:active { cursor: grabbing; }
-.orb-trigger:hover { transform: none; filter: saturate(1.12); box-shadow: 0 10px 26px rgba(0,0,0,.52), 0 0 0 5px color-mix(in srgb, var(--acid) 10%, transparent), 0 0 30px color-mix(in srgb, var(--acid) 36%, transparent); }
+.orb-trigger:hover { transform: none; filter: saturate(1.12); box-shadow: 0 6px 18px rgba(0,0,0,.44), 0 0 0 4px color-mix(in srgb, var(--acid) 14%, transparent), 0 0 22px color-mix(in srgb, var(--acid) 31%, transparent); }
 .orb-trigger::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; background: radial-gradient(circle at 34% 26%, color-mix(in srgb, var(--orb-light) 42%, #101513), var(--orb-deep) 70%); box-shadow: inset 0 1px 4px rgba(255,255,255,.12), inset 0 -5px 9px rgba(0,0,0,.46); }
 .orb-ring { --orb-progress: 0deg; position: absolute; z-index: 1; inset: 3px; border-radius: 50%; background: conic-gradient(from -35deg, var(--acid) var(--orb-progress), rgba(255,255,255,.08) 0); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acid) 42%, transparent)); }
 .orb-ring::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: transparent; border: 1px solid color-mix(in srgb, var(--orb-highlight) 22%, transparent); }

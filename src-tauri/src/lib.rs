@@ -12,7 +12,7 @@ use std::{
         mpsc, Arc, Mutex,
     },
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     menu::{Menu, MenuItem},
@@ -602,6 +602,9 @@ fn set_floating_visible(app: &AppHandle, visible: bool) -> Result<bool, String> 
         .map_err(|_| "本地状态暂时不可用".to_owned())?
         .floating_pinned;
     if visible {
+        window
+            .set_always_on_top(true)
+            .map_err(|error| error.to_string())?;
         window.show().map_err(|error| error.to_string())?;
         if !pinned {
             window.set_focus().map_err(|error| error.to_string())?;
@@ -643,6 +646,60 @@ fn is_floating_pin_hit(
 }
 
 #[cfg(target_os = "windows")]
+fn is_screenshot_capture_window(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{
+            OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        },
+        UI::WindowsAndMessaging::GetWindowThreadProcessId,
+    };
+
+    if hwnd.is_null() {
+        return false;
+    }
+    let mut process_id = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut process_id) };
+    if process_id == 0 {
+        return false;
+    }
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    if process.is_null() {
+        return false;
+    }
+
+    let mut path = [0u16; 512];
+    let mut length = path.len() as u32;
+    let queried =
+        unsafe { QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut length) != 0 };
+    unsafe { CloseHandle(process) };
+    if !queried {
+        return false;
+    }
+
+    let path = String::from_utf16_lossy(&path[..length as usize]);
+    let executable = path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        executable.as_str(),
+        "snippingtool.exe"
+            | "screenclippinghost.exe"
+            | "screensketch.exe"
+            | "sharex.exe"
+            | "greenshot.exe"
+            | "lightshot.exe"
+            | "snagit.exe"
+            | "snagitcapture.exe"
+            | "picpick.exe"
+            | "faststonecapture.exe"
+            | "winsnap.exe"
+    )
+}
+
+#[cfg(target_os = "windows")]
 fn start_click_through_controller(
     window: WebviewWindow,
     pinned: Arc<AtomicBool>,
@@ -650,7 +707,11 @@ fn start_click_through_controller(
 ) {
     use windows_sys::Win32::{
         Foundation::{POINT, RECT},
-        UI::WindowsAndMessaging::{GetCursorPos, GetWindowRect},
+        UI::WindowsAndMessaging::{
+            GetCursorPos, GetForegroundWindow, GetWindow, GetWindowRect, IsWindowVisible,
+            SetWindowPos, GW_HWNDPREV, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+            SWP_NOOWNERZORDER, SWP_NOSIZE,
+        },
     };
 
     let Ok(raw_hwnd) = window.hwnd() else {
@@ -660,6 +721,9 @@ fn start_click_through_controller(
     thread::spawn(move || {
         let hwnd = hwnd_value as windows_sys::Win32::Foundation::HWND;
         let mut last_passthrough = false;
+        let mut last_foreground = std::ptr::null_mut();
+        let mut screenshot_overlay_active = false;
+        let mut last_topmost_check = Instant::now();
         loop {
             let mut point = POINT { x: 0, y: 0 };
             let mut rect = RECT {
@@ -673,6 +737,52 @@ fn start_click_through_controller(
             if !valid {
                 break;
             }
+
+            let foreground = unsafe { GetForegroundWindow() };
+            if foreground != last_foreground {
+                last_foreground = foreground;
+                let capture_active = is_screenshot_capture_window(foreground);
+                if capture_active != screenshot_overlay_active {
+                    screenshot_overlay_active = capture_active;
+                    unsafe {
+                        SetWindowPos(
+                            hwnd,
+                            if capture_active {
+                                HWND_NOTOPMOST
+                            } else {
+                                HWND_TOPMOST
+                            },
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                        );
+                    }
+                }
+            }
+
+            // Reassert the topmost order once per second, except while a
+            // screenshot tool is active. Never activate the window here.
+            if !screenshot_overlay_active && last_topmost_check.elapsed() >= Duration::from_secs(1)
+            {
+                last_topmost_check = Instant::now();
+                if unsafe { IsWindowVisible(hwnd) != 0 && !GetWindow(hwnd, GW_HWNDPREV).is_null() }
+                {
+                    unsafe {
+                        SetWindowPos(
+                            hwnd,
+                            HWND_TOPMOST,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                        );
+                    }
+                }
+            }
+
             let over_pin = is_floating_pin_hit(
                 point.x,
                 point.y,
@@ -1142,7 +1252,7 @@ fn set_orb_window_region(
     collapsed: bool,
     side: &str,
 ) -> Result<(), String> {
-    use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject, SetWindowRgn};
+    use windows_sys::Win32::Graphics::Gdi::{CreateEllipticRgn, DeleteObject, SetWindowRgn};
 
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
     if !collapsed {
@@ -1159,7 +1269,7 @@ fn set_orb_window_region(
     } else {
         0
     };
-    let region = unsafe { CreateRectRgn(left, 0, left + orb_size, size.height as i32) };
+    let region = unsafe { CreateEllipticRgn(left, 0, left + orb_size, size.height as i32) };
     if region.is_null() {
         return Err("无法创建悬浮球交互区域".to_owned());
     }
@@ -1624,15 +1734,15 @@ fn set_floating_opacity(
 fn set_floating_always_on_top(
     app: AppHandle,
     state: State<'_, AppState>,
-    always_on_top: bool,
+    _always_on_top: bool,
 ) -> Result<bool, String> {
     app.get_webview_window("floating")
         .ok_or("悬浮窗尚未创建")?
-        .set_always_on_top(always_on_top)
+        .set_always_on_top(true)
         .map_err(|error| error.to_string())?;
-    update_state(&state, |data| data.floating_always_on_top = always_on_top)?;
+    update_state(&state, |data| data.floating_always_on_top = true)?;
     let _ = app.emit("floating-settings-changed", get_floating_settings(state)?);
-    Ok(always_on_top)
+    Ok(true)
 }
 
 #[tauri::command]
@@ -1650,12 +1760,11 @@ fn set_display_mode(
 }
 
 #[tauri::command]
-fn set_theme(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    theme: String,
-) -> Result<String, String> {
-    if !matches!(theme.as_str(), "lime" | "cyan" | "violet" | "amber" | "rose") {
+fn set_theme(app: AppHandle, state: State<'_, AppState>, theme: String) -> Result<String, String> {
+    if !matches!(
+        theme.as_str(),
+        "lime" | "cyan" | "violet" | "amber" | "rose"
+    ) {
         return Err("主题配色无效".to_owned());
     }
     update_state(&state, |data| data.theme = theme.clone())?;
@@ -1790,7 +1899,7 @@ fn restore_windows(app: &AppHandle, data: &PersistedState) {
         } else {
             position_floating(app);
         }
-        let _ = window.set_always_on_top(data.floating_always_on_top);
+        let _ = window.set_always_on_top(true);
         if data.floating_visible {
             let _ = window.show();
         }
@@ -1813,7 +1922,9 @@ pub fn run() {
             let file_path = data_dir.join("state.json");
             let legacy_file = app.path().app_data_dir()?.join("data/state.json");
             migrate_legacy_state(&legacy_file, &file_path);
-            let persisted = load_state(&file_path);
+            let mut persisted = load_state(&file_path);
+            let repair_topmost_setting = !persisted.floating_always_on_top;
+            persisted.floating_always_on_top = true;
             let save_sender = start_state_writer(file_path.clone());
             let floating_pinned = Arc::new(AtomicBool::new(persisted.floating_pinned));
             let floating_orb = Arc::new(AtomicBool::new(persisted.floating_style == "orb"));
@@ -1826,6 +1937,11 @@ pub fn run() {
                 floating_orb_dragging: AtomicBool::new(false),
                 floating_orb_expanded: AtomicBool::new(false),
             });
+            if repair_topmost_setting {
+                let _ = update_state(&app.state::<AppState>(), |data| {
+                    data.floating_always_on_top = true;
+                });
+            }
             restore_windows(app.handle(), &persisted);
             if let Some(window) = app.get_webview_window("floating") {
                 start_click_through_controller(window, floating_pinned, floating_orb);

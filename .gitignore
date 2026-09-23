@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 src-tauri/target
+_build/
 data/
 output/
 codex-quota.exe

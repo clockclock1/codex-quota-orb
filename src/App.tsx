@@ -1,4 +1,4 @@
-import { type CSSProperties, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
@@ -30,6 +30,12 @@ type FloatingSettings = {
   dataDirectory: string;
 };
 type OrbDragResult = { moved: boolean; atEdge: boolean; side: "left" | "right" };
+type OrbPointerPress = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  cursorStart: ReturnType<typeof cursorPosition>;
+};
 
 const defaultFloatingSettings: FloatingSettings = {
   visible: false,
@@ -170,6 +176,7 @@ function FloatingApp() {
   const orbWasExpanded = useRef(false);
   const orbHoverTimer = useRef<number | undefined>(undefined);
   const orbTransitionToken = useRef(0);
+  const orbPointerPress = useRef<OrbPointerPress | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
@@ -258,7 +265,8 @@ function FloatingApp() {
 
   const setOrbOpen = async (expanded: boolean) => {
     if (settings.style !== "orb") return;
-    if (orbDragging.current) return;
+    if (orbDragging.current || orbPointerPress.current) return;
+    if (orbExpanded === expanded) return;
     if (!orbAtEdge && !expanded) return;
     const token = ++orbTransitionToken.current;
     if (!("__TAURI_INTERNALS__" in window)) {
@@ -292,6 +300,7 @@ function FloatingApp() {
     if (orbHoverTimer.current !== undefined) window.clearTimeout(orbHoverTimer.current);
     orbHoverTimer.current = window.setTimeout(async () => {
       orbHoverTimer.current = undefined;
+      if (orbPointerPress.current || orbDragging.current) return;
       if (!expanded && "__TAURI_INTERNALS__" in window) {
         try {
           if (await invoke<boolean>("get_floating_orb_pointer_inside")) return;
@@ -334,22 +343,18 @@ function FloatingApp() {
     };
   }, [finishOrbDrag]);
 
-  const dragOrb = async (event: ReactMouseEvent) => {
-    if (event.button !== 0 || !orbReady || !("__TAURI_INTERNALS__" in window)) return;
-    if (orbDragging.current) return;
-    let dragStart: Awaited<ReturnType<typeof cursorPosition>>;
-    try {
-      dragStart = await cursorPosition();
-    } catch {
-      return;
-    }
+  const beginOrbDrag = async (press: OrbPointerPress) => {
+    if (orbDragging.current || !("__TAURI_INTERNALS__" in window)) return;
+    orbPointerPress.current = null;
     if (orbHoverTimer.current !== undefined) window.clearTimeout(orbHoverTimer.current);
+    orbHoverTimer.current = undefined;
     ++orbTransitionToken.current;
     orbDragging.current = true;
     orbWasExpanded.current = orbExpanded;
     setOrbExpanded(false);
     setOrbDraggingVisual(true);
     try {
+      const dragStart = await press.cursorStart;
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       await invoke("start_floating_orb_drag", { cursorStartX: dragStart.x, cursorStartY: dragStart.y });
     } catch {
@@ -357,6 +362,40 @@ function FloatingApp() {
       setOrbExpanded(orbWasExpanded.current);
       setOrbDraggingVisual(false);
     }
+  };
+
+  const handleOrbPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0 || !orbReady || !("__TAURI_INTERNALS__" in window) || orbDragging.current) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (orbHoverTimer.current !== undefined) window.clearTimeout(orbHoverTimer.current);
+    orbHoverTimer.current = undefined;
+    orbPointerPress.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      cursorStart: cursorPosition(),
+    };
+  };
+
+  const handleOrbPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const press = orbPointerPress.current;
+    if (!press || press.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - press.startX;
+    const deltaY = event.clientY - press.startY;
+    if (deltaX * deltaX + deltaY * deltaY < 16) return;
+    void beginOrbDrag(press);
+  };
+
+  const handleOrbPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const press = orbPointerPress.current;
+    if (!press || press.pointerId !== event.pointerId) return;
+    orbPointerPress.current = null;
+    if (orbAtEdge && !orbExpanded) scheduleOrbOpen(true);
+  };
+
+  const handleOrbPointerCancel = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (orbPointerPress.current?.pointerId === event.pointerId) orbPointerPress.current = null;
   };
 
   const floatingBackgroundStyle = { backgroundColor: `rgba(13, 17, 18, ${settings.opacity})` } as CSSProperties;
@@ -367,8 +406,8 @@ function FloatingApp() {
     return (
       <main
         className={`floating-shell floating-shell--orb is-${orbSide} ${orbExpanded ? "is-expanded" : ""} ${orbDraggingVisual ? "is-dragging" : ""}`}
-        onMouseEnter={() => { if (orbReady && orbAtEdge && !orbDragging.current) scheduleOrbOpen(true); }}
-        onMouseLeave={() => { if (orbReady && orbAtEdge && !orbDragging.current) scheduleOrbOpen(false); }}
+        onMouseEnter={() => { if (orbReady && orbAtEdge && !orbDragging.current && !orbPointerPress.current) scheduleOrbOpen(true); }}
+        onMouseLeave={() => { if (orbReady && orbAtEdge && !orbDragging.current && !orbPointerPress.current) scheduleOrbOpen(false); }}
       >
         <div className="floating-background" style={floatingBackgroundStyle} aria-hidden="true" />
         <div className={`orb-teaser ${orbExpanded ? "is-visible" : ""}`} aria-hidden={!orbExpanded} aria-label="Codex 额度摘要">
@@ -387,7 +426,10 @@ function FloatingApp() {
         </div>
         <button
           className="orb-trigger"
-          onMouseDown={(event) => void dragOrb(event)}
+          onPointerDown={handleOrbPointerDown}
+          onPointerMove={handleOrbPointerMove}
+          onPointerUp={handleOrbPointerUp}
+          onPointerCancel={handleOrbPointerCancel}
           aria-label="Codex 额度悬浮球"
           title="拖动调整悬浮球位置"
         >
@@ -533,18 +575,6 @@ function DashboardApp() {
     } catch (reason) { setError(String(reason)); }
   };
 
-  const setAlwaysOnTop = async () => {
-    const next = !floatingSettings.alwaysOnTop;
-    if (!("__TAURI_INTERNALS__" in window)) {
-      setFloatingSettings((value) => ({ ...value, alwaysOnTop: next }));
-      return;
-    }
-    try {
-      const alwaysOnTop = await invoke<boolean>("set_floating_always_on_top", { alwaysOnTop: next });
-      setFloatingSettings((value) => ({ ...value, alwaysOnTop }));
-    } catch (reason) { setError(String(reason)); }
-  };
-
   const setFloatingStyle = async (style: FloatingSettings["style"]) => {
     setFloatingSettings((value) => ({ ...value, style }));
     if (!("__TAURI_INTERNALS__" in window)) return;
@@ -656,8 +686,8 @@ function DashboardApp() {
                 <button className={`compact-action ${floatingSettings.pinned ? "is-active" : ""}`} onClick={setPinned} disabled={floatingSettings.style === "orb"}>{floatingSettings.style === "orb" ? "小球可交互" : floatingSettings.pinned ? "取消固定" : "固定"}</button>
               </div>
               <div className="settings-block settings-block--inline">
-                <div><span className="settings-label">窗口置顶</span><small>{floatingSettings.alwaysOnTop ? "保持在其他窗口上方" : "按普通窗口层级显示"}</small></div>
-                <button className={`mini-switch ${floatingSettings.alwaysOnTop ? "is-active" : ""}`} onClick={setAlwaysOnTop} aria-pressed={floatingSettings.alwaysOnTop}><i /></button>
+                <div><span className="settings-label">窗口置顶</span><small>持续置顶，高于普通窗口层级</small></div>
+                <span className="topmost-badge">始终</span>
               </div>
               <label className="opacity-control"><span>黑色背景透明度 <b>{Math.round((1 - floatingSettings.opacity) * 100)}%</b></span><input type="range" min="0" max="100" value={Math.round((1 - floatingSettings.opacity) * 100)} onChange={(event) => void setOpacity(1 - Number(event.target.value) / 100)} /></label>
               <div className="settings-block proxy-settings">
